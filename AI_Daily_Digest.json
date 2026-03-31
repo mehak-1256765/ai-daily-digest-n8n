@@ -1,0 +1,417 @@
+{
+  "name": "AI Daily Digest - Morning Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "230c3f50-a503-4a8e-8c30-8f63bb769697",
+      "name": "\u23f0 Every Morning 7 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        544,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 15,
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "id": "9b1c4bef-aaaf-4b90-9462-4c185718cb6f",
+      "name": "Fetch Unread Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1072,
+        928
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "-- ADD YOUR OWN --"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+        "options": {}
+      },
+      "id": "21fa8e9f-1262-4198-b067-060f91017753",
+      "name": "Fetch Google News",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://feeds.feedburner.com/TechCrunch/",
+        "options": {}
+      },
+      "id": "d3e983d8-a59b-476e-a482-191fa2f5a1c9",
+      "name": "Fetch TechCrunch",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "limit": 20,
+        "timeMin": "={{ $today.toISO() }}",
+        "timeMax": "={{ $today.plus({ days: 1 }).toISO() }}",
+        "options": {}
+      },
+      "id": "fd439447-4859-4596-97b6-533dcae420cf",
+      "name": "Today's Calendar Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1072,
+        1504
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "-- ADD YOUR OWN --"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "30f0dd79-8cea-469b-ac49-10efad02f2ea",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\n// Emails (from Gmail \u2014 have threadId)\nconst emails = allItems\n  .filter(item => item.json.threadId)\n  .map(item => ({\n    from: item.json.From || item.json.from || 'Unknown',\n    subject: item.json.Subject || item.json.subject || 'No Subject',\n    snippet: (item.json.snippet || item.json.textPlain || 'No preview').substring(0, 120)\n  }));\n\n// News items (from RSS \u2014 have title + link, no threadId)\nconst newsItems = allItems\n  .filter(item => item.json.title && item.json.link && !item.json.threadId)\n  .slice(0, 15)\n  .map(item => ({\n    title: (item.json.title || '').replace(/<[^>]*>/g, ''),\n    link: item.json.link || '',\n    pubDate: item.json.pubDate || item.json.isoDate || ''\n  }));\n\n// Calendar events (have summary or start.dateTime)\nconst events = allItems\n  .filter(item => {\n    const j = item.json;\n    return (j.summary || j.start?.dateTime || j.start?.date) && !j.threadId && !j.link;\n  })\n  .map(item => {\n    const j = item.json;\n    let startTime = '';\n    let endTime = '';\n    if (j.start?.dateTime) {\n      startTime = new Date(j.start.dateTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });\n      endTime = j.end?.dateTime ? new Date(j.end.dateTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';\n    } else if (j.start?.date) {\n      startTime = 'All day';\n    }\n    return {\n      title: j.summary || 'Untitled Event',\n      start: startTime,\n      end: endTime,\n      location: j.location || ''\n    };\n  });\n\nreturn [{\n  json: {\n    date: new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),\n    emailCount: emails.length,\n    emails: JSON.stringify(emails),\n    newsCount: newsItems.length,\n    news: JSON.stringify(newsItems),\n    eventCount: events.length,\n    events: JSON.stringify(events)\n  }\n}];"
+      },
+      "id": "73dba050-341b-47f2-98ba-3a6b9c6a9313",
+      "name": "Process Combined Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Here are today's news headlines. Write a 1-line summary (max 15 words) for each headline. Return ONLY a JSON array of objects with \"title\" and \"summary\" keys. No markdown, no backticks, no explanation.\n\nHeadlines:\n{{ $json.news }}",
+        "options": {
+          "systemMessage": "You are a news summarizer. You ONLY output valid JSON arrays. Never use markdown. Never use code fences. Never add any text outside the JSON. Example output: [{\"title\":\"Some headline\",\"summary\":\"Brief summary here\"}]"
+        }
+      },
+      "id": "f6feae70-676d-4e67-9650-48fafe7d1634",
+      "name": "AI Summarize News",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1744,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "model": "mistral-medium",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "b6713554-ad75-45c4-b2ef-4ae08ff055f8",
+      "name": "Mistral Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        1696,
+        1424
+      ],
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "",
+          "name": "-- ADD YOUR OWN --"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiRaw = $input.first().json.output || '[]';\nconst data = $('Process Combined Data').first().json;\n\n// Parse data\nlet emails = [];\nlet news = [];\nlet events = [];\nlet aiSummaries = [];\n\ntry { emails = JSON.parse(data.emails); } catch(e) {}\ntry { news = JSON.parse(data.news); } catch(e) {}\ntry { events = JSON.parse(data.events); } catch(e) {}\n\n// Parse AI summaries\ntry {\n  const cleaned = aiRaw.replace(/```json/gi,'').replace(/```/g,'').trim();\n  aiSummaries = JSON.parse(cleaned);\n} catch(e) {\n  aiSummaries = [];\n}\n\n// Helper: get summary for a headline\nfunction getSummary(title) {\n  const match = aiSummaries.find(s => s.title && title.includes(s.title.substring(0, 20)));\n  return match ? match.summary : '';\n}\n\n// Greeting based on time with emoji\nconst hour = new Date().getHours();\nlet greeting = '';\nlet emoji = '';\n\nif (hour >= 5 && hour < 12) {\n  greeting = 'Good Morning';\n  emoji = '\u2600\ufe0f';\n} else if (hour >= 12 && hour < 18) {\n  greeting = 'Good Afternoon';\n  emoji = '\ud83c\udf24\ufe0f';\n} else {\n  greeting = 'Good Evening';\n  emoji = '\ud83c\udf19';\n}\n\n// === BUILD EMAIL ROWS ===\n\n// --- Email rows ---\nlet emailRows = '';\nconst showEmails = emails.slice(0, 6);\nfor (let i = 0; i < showEmails.length; i++) {\n  const e = showEmails[i];\n  const fromName = e.from.split('<')[0].trim() || e.from;\n  const fromEmail = (e.from.match(/<(.+?)>/) || ['',''])[1];\n  const isLast = i === showEmails.length - 1;\n  emailRows += `\n  <tr>\n    <td style=\"padding:16px 24px;${!isLast ? ' border-bottom:1px solid #f1f5f9;' : ''}\">\n      <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n        <td width=\"44\" valign=\"top\">\n          <div style=\"width:40px; height:40px; border-radius:10px; background:${['#6366f1','#ec4899','#f59e0b','#10b981','#8b5cf6','#06b6d4'][i % 6]}; color:#fff; font-size:16px; font-weight:700; line-height:40px; text-align:center;\">${fromName.charAt(0).toUpperCase()}</div>\n        </td>\n        <td style=\"padding-left:14px;\">\n          <p style=\"margin:0 0 2px 0; font-size:14px; font-weight:700; color:#1e293b;\">${fromName}</p>\n          <p style=\"margin:0 0 4px 0; font-size:13px; font-weight:600; color:#334155;\">${e.subject}</p>\n          <p style=\"margin:0; font-size:12px; color:#94a3b8; line-height:1.4;\">${e.snippet}...</p>\n        </td>\n      </tr></table>\n    </td>\n  </tr>`;\n}\nconst remainingEmails = emails.length - showEmails.length;\nif (remainingEmails > 0) {\n  emailRows += `\n  <tr><td style=\"padding:12px 24px; text-align:center;\">\n    <a href=\"https://mail.google.com\" style=\"font-size:13px; color:#6366f1; text-decoration:none; font-weight:600;\">+${remainingEmails} more emails \u2014 Open Gmail \u2192</a>\n  </td></tr>`;\n}\n\n// --- News rows ---\nlet newsRows = '';\nconst showNews = news.slice(0, 6);\nfor (let i = 0; i < showNews.length; i++) {\n  const n = showNews[i];\n  const summary = getSummary(n.title);\n  const isLast = i === showNews.length - 1;\n  const colors = ['#ef4444','#f59e0b','#3b82f6','#10b981','#8b5cf6','#ec4899'];\n  newsRows += `\n  <tr>\n    <td style=\"padding:14px 24px;${!isLast ? ' border-bottom:1px solid #f1f5f9;' : ''}\">\n      <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n        <td width=\"6\" valign=\"top\" style=\"padding-top:6px;\"><div style=\"width:6px; height:6px; border-radius:50%; background:${colors[i % 6]};\"></div></td>\n        <td style=\"padding-left:12px;\">\n          <a href=\"${n.link}\" style=\"font-size:14px; font-weight:600; color:#1e293b; text-decoration:none; line-height:1.4;\">${n.title}</a>\n          ${summary ? `<p style=\"margin:4px 0 0 0; font-size:12px; color:#64748b; line-height:1.4;\">${summary}</p>` : ''}\n        </td>\n      </tr></table>\n    </td>\n  </tr>`;\n}\nconst remainingNews = news.length - showNews.length;\nif (remainingNews > 0) {\n  newsRows += `\n  <tr><td style=\"padding:12px 24px; text-align:center;\">\n    <a href=\"https://news.google.com\" style=\"font-size:13px; color:#6366f1; text-decoration:none; font-weight:600;\">+${remainingNews} more headlines \u2014 Open Google News \u2192</a>\n  </td></tr>`;\n}\n\n// --- Calendar rows ---\nlet calendarRows = '';\nif (events.length === 0) {\n  calendarRows = `\n  <tr><td style=\"padding:24px; text-align:center;\">\n    <p style=\"margin:0 0 4px 0; font-size:28px;\">\ud83c\udf89</p>\n    <p style=\"margin:0 0 4px 0; font-size:15px; font-weight:600; color:#10b981;\">No meetings today!</p>\n    <p style=\"margin:0; font-size:13px; color:#94a3b8;\">Your calendar is clear \u2014 deep work time.</p>\n  </td></tr>`;\n} else {\n  for (let i = 0; i < events.length; i++) {\n    const ev = events[i];\n    const isLast = i === events.length - 1;\n    const timeStr = ev.end ? `${ev.start} \u2013 ${ev.end}` : ev.start;\n    calendarRows += `\n    <tr>\n      <td style=\"padding:14px 24px;${!isLast ? ' border-bottom:1px solid #f1f5f9;' : ''}\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          <td width=\"52\" valign=\"top\">\n            <div style=\"background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:6px 10px; text-align:center;\">\n              <p style=\"margin:0; font-size:11px; color:#16a34a; font-weight:700;\">${timeStr}</p>\n            </div>\n          </td>\n          <td style=\"padding-left:14px;\">\n            <p style=\"margin:0; font-size:14px; font-weight:600; color:#1e293b;\">${ev.title}</p>\n            ${ev.location ? `<p style=\"margin:4px 0 0 0; font-size:12px; color:#94a3b8;\">\ud83d\udccd ${ev.location}</p>` : ''}\n          </td>\n        </tr></table>\n      </td>\n    </tr>`;\n  }\n}\n\n// --- Tips ---\nconst tips = [\n  { icon: '\ud83c\udfaf', tip: 'Start with your hardest task \u2014 willpower is highest in the morning.' },\n  { icon: '\ud83d\udcf5', tip: 'Block 2 hours of distraction-free time. Close Slack & socials.' },\n  { icon: '\u270d\ufe0f', tip: 'Write down 3 must-do items. Anything else is a bonus.' },\n  { icon: '\ud83e\uddd8', tip: 'Take a 5-min break every 90 minutes. Your brain needs it.' },\n  { icon: '\ud83d\udce7', tip: 'Batch email replies at 11 AM and 4 PM. Don\\'t live in your inbox.' },\n  { icon: '\ud83d\ude80', tip: 'Ship something small today. Progress beats perfection.' },\n  { icon: '\ud83d\udca7', tip: 'Drink water before coffee. Hydration boosts focus by 14%.' }\n];\nconst todayTip = tips[new Date().getDay() % tips.length];\n\n// === ASSEMBLE FULL HTML ===\nconst html = `<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>\n<body style=\"margin:0; padding:0; background-color:#f1f5f9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif; -webkit-font-smoothing:antialiased;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:32px 16px;\">\n<tr><td align=\"center\">\n<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 30px rgba(0,0,0,0.06);\">\n\n<!-- HEADER -->\n<tr><td style=\"background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); padding:36px 32px; text-align:center;\">\n  <p style=\"margin:0 0 6px 0; font-size:12px; color:#94a3b8; letter-spacing:3px; text-transform:uppercase; font-weight:500;\">${emoji} ${greeting}</p>\n  <h1 style=\"margin:0 0 8px 0; font-size:26px; color:#ffffff; font-weight:700;\">Your Daily Digest</h1>\n  <p style=\"margin:0; font-size:13px; color:#64748b;\">${data.date}</p>\n</td></tr>\n\n<!-- STATS -->\n<tr><td style=\"padding:24px 32px 0 32px;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n    <td width=\"33%\" style=\"padding:0 6px 0 0;\">\n      <div style=\"background:#eff6ff; border-radius:12px; padding:18px 12px; text-align:center;\">\n        <p style=\"margin:0; font-size:28px; font-weight:800; color:#2563eb;\">${data.emailCount}</p>\n        <p style=\"margin:6px 0 0 0; font-size:11px; color:#64748b; letter-spacing:1px; text-transform:uppercase;\">Emails</p>\n      </div>\n    </td>\n    <td width=\"33%\" style=\"padding:0 3px;\">\n      <div style=\"background:#fefce8; border-radius:12px; padding:18px 12px; text-align:center;\">\n        <p style=\"margin:0; font-size:28px; font-weight:800; color:#ca8a04;\">${data.newsCount}</p>\n        <p style=\"margin:6px 0 0 0; font-size:11px; color:#64748b; letter-spacing:1px; text-transform:uppercase;\">News</p>\n      </div>\n    </td>\n    <td width=\"33%\" style=\"padding:0 0 0 6px;\">\n      <div style=\"background:#f0fdf4; border-radius:12px; padding:18px 12px; text-align:center;\">\n        <p style=\"margin:0; font-size:28px; font-weight:800; color:#16a34a;\">${data.eventCount}</p>\n        <p style=\"margin:6px 0 0 0; font-size:11px; color:#64748b; letter-spacing:1px; text-transform:uppercase;\">Events</p>\n      </div>\n    </td>\n  </tr></table>\n</td></tr>\n\n<!-- EMAILS SECTION -->\n<tr><td style=\"padding:28px 32px 0 32px;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;\">\n    <tr><td style=\"background:#f8fafc; padding:14px 24px; border-bottom:1px solid #e2e8f0;\">\n      <p style=\"margin:0; font-size:14px; font-weight:700; color:#1e293b;\">\ud83d\udce7 Unread Emails <span style=\"background:#2563eb; color:#fff; font-size:11px; padding:2px 8px; border-radius:10px; margin-left:8px;\">${data.emailCount}</span></p>\n    </td></tr>\n    ${emailRows}\n  </table>\n</td></tr>\n\n<!-- NEWS SECTION -->\n<tr><td style=\"padding:24px 32px 0 32px;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;\">\n    <tr><td style=\"background:#f8fafc; padding:14px 24px; border-bottom:1px solid #e2e8f0;\">\n      <p style=\"margin:0; font-size:14px; font-weight:700; color:#1e293b;\">\ud83d\udcf0 Top News <span style=\"background:#ca8a04; color:#fff; font-size:11px; padding:2px 8px; border-radius:10px; margin-left:8px;\">${data.newsCount}</span></p>\n    </td></tr>\n    ${newsRows}\n  </table>\n</td></tr>\n\n<!-- CALENDAR SECTION -->\n<tr><td style=\"padding:24px 32px 0 32px;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;\">\n    <tr><td style=\"background:#f8fafc; padding:14px 24px; border-bottom:1px solid #e2e8f0;\">\n      <p style=\"margin:0; font-size:14px; font-weight:700; color:#1e293b;\">\ud83d\udcc5 Today's Calendar <span style=\"background:#16a34a; color:#fff; font-size:11px; padding:2px 8px; border-radius:10px; margin-left:8px;\">${data.eventCount}</span></p>\n    </td></tr>\n    ${calendarRows}\n  </table>\n</td></tr>\n\n<!-- DAILY TIP -->\n<tr><td style=\"padding:24px 32px 0 32px;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:linear-gradient(135deg,#faf5ff,#ede9fe); border-radius:12px; border:1px solid #e9d5ff;\">\n    <tr><td style=\"padding:20px 24px;\">\n      <p style=\"margin:0 0 8px 0; font-size:13px; font-weight:700; color:#7c3aed; letter-spacing:1px; text-transform:uppercase;\">\ud83d\udca1 Daily Tip</p>\n      <p style=\"margin:0; font-size:14px; color:#4c1d95; line-height:1.5;\">${todayTip.icon} ${todayTip.tip}</p>\n    </td></tr>\n  </table>\n</td></tr>\n\n<!-- FOOTER -->\n<tr><td style=\"padding:28px 32px; text-align:center;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n    <tr><td style=\"border-top:1px solid #f1f5f9; padding-top:20px; text-align:center;\">\n      <p style=\"margin:0 0 6px 0; font-size:12px; color:#94a3b8;\">Generated automatically with AI \u2728</p>\n      <p style=\"margin:0; font-size:11px; color:#cbd5e1;\">Powered by <a href=\"https://n8n.io\" style=\"color:#6366f1; text-decoration:none;\">n8n</a> \u00b7 <a href=\"https://mail.google.com\" style=\"color:#6366f1; text-decoration:none;\">Open Gmail</a> \u00b7 <a href=\"https://calendar.google.com\" style=\"color:#6366f1; text-decoration:none;\">Open Calendar</a></p>\n    </td></tr>\n  </table>\n</td></tr>\n\n</table>\n</td></tr></table>\n</body></html>`;\n\nreturn [{ json: { htmlEmail: html, date: data.date, emailCount: data.emailCount, newsCount: data.newsCount, eventCount: data.eventCount } }];"
+      },
+      "id": "bf1d692c-9ea1-4459-bcb7-927f475314f8",
+      "name": "Build HTML Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@gmail.com",
+        "subject": "=\ud83c\udf05 Your AI Daily Digest \u2014 {{ $('Build HTML Email').item.json.date }}",
+        "message": "={{ $('Build HTML Email').item.json.htmlEmail }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "AI Daily Digest"
+        }
+      },
+      "id": "6adbd5b7-63ff-436c-8914-9a682a947a93",
+      "name": "Send Briefing Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2320,
+        1120
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "-- ADD YOUR OWN --"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Your Google Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "f09295f3-de24-4f45-a59c-f991b0fe30ee",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2320,
+        1312
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "-- ADD YOUR OWN --"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "\u23f0 Every Morning 7 AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unread Emails",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Google News",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch TechCrunch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Today's Calendar Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Google News": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch TechCrunch": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Today's Calendar Events": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Process Combined Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Combined Data": {
+      "main": [
+        [
+          {
+            "node": "AI Summarize News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Summarize News",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Summarize News": {
+      "main": [
+        [
+          {
+            "node": "Build HTML Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML Email": {
+      "main": [
+        [
+          {
+            "node": "Send Briefing Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": ""
+  },
+  "id": "",
+  "tags": [
+    {
+      "updatedAt": "2026-03-30T14:17:51.637Z",
+      "createdAt": "2026-03-30T14:17:51.637Z",
+      "id": "MimxWHS7xTXbX8ro",
+      "name": "Google Calendar"
+    },
+    {
+      "updatedAt": "2026-03-27T15:33:18.175Z",
+      "createdAt": "2026-03-27T15:33:18.175Z",
+      "id": "e323hAfuW8WdWtRa",
+      "name": "AI"
+    },
+    {
+      "updatedAt": "2026-03-30T14:17:51.586Z",
+      "createdAt": "2026-03-30T14:17:51.586Z",
+      "id": "i6eTwaSN0qC5rgMz",
+      "name": "Daily Digest"
+    },
+    {
+      "updatedAt": "2026-03-30T14:17:51.553Z",
+      "createdAt": "2026-03-30T14:17:51.553Z",
+      "id": "jJD2uMgH5vTvVpCY",
+      "name": "Productivity"
+    },
+    {
+      "updatedAt": "2026-03-30T14:17:51.611Z",
+      "createdAt": "2026-03-30T14:17:51.611Z",
+      "id": "z4kczhbMx77CE7Y7",
+      "name": "Gmail"
+    }
+  ]
+}
